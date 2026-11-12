@@ -1,6 +1,9 @@
-<!doctype html><html><head><meta charset=utf8><meta name=viewport content="width=device-width,initial-scale=1,viewport-fit=cover"><style>:root{color-scheme:light;box-sizing:border-box;padding-top:env(safe-area-inset-top,0px);padding-bottom:env(safe-area-inset-bottom,0px)}html{scroll-padding-top:env(safe-area-inset-top,0px)}body{margin:0;padding:0;font:14px -apple-system,BlinkMacSystemFont,sans-serif;background:#fff;color:#000}img{max-width:100%}[hidden]:not([hidden=until-found i]){display:none!important}</style></head><body>
+<!doctype html>
+<html lang="vi">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width,initial-scale=1,viewport-fit=cover">
 <title>Casio Click</title>
-<meta name="claude:viewport-fit-sides" content="cover">
 <link rel="stylesheet" href="https://fonts.googleapis.com/css2?family=Lilita+One&family=Nunito:wght@600;700;800&display=swap">
 <style>
 /* Look: a bright 2020-style mobile idle game. Sky-blue backdrop, cream panels with thick navy outlines and a solid drop edge, glossy chunky buttons with outlined text, a green-glass calculator display, a sunny park behind the 3D treadmill. No glow, blur or neon. One deliberate light theme. */
@@ -247,6 +250,8 @@ svg.map{display:block;width:100%;height:auto;border-radius:8px}
 }
 @media (prefers-reduced-motion:reduce){.float{animation:fadeonly 1s linear forwards}.toast,.cursor,.belt,.modal,.modal .pet,.verify-card,.rush,.notice .nd{animation:none}}
 </style>
+</head>
+<body>
 <div class="app">
   <header class="top">
     <div class="brand"><span class="lcd-badge">Ans+1</span><div><h1>Casio Click</h1><small>Máy tính · Máy chạy bộ · Thú cưng</small></div></div>
@@ -289,6 +294,153 @@ svg.map{display:block;width:100%;height:auto;border-radius:8px}
 <div class="modal-back" id="modal" hidden><div class="modal" id="modalBody"></div></div>
 <div class="gate" id="gate"><div class="gate-card" id="gateCard"></div></div>
 <script src="https://cdnjs.cloudflare.com/ajax/libs/three.js/r128/three.min.js"></script>
+<script src="https://www.gstatic.com/firebasejs/10.12.2/firebase-app-compat.js"></script>
+<script src="https://www.gstatic.com/firebasejs/10.12.2/firebase-auth-compat.js"></script>
+<script src="https://www.gstatic.com/firebasejs/10.12.2/firebase-firestore-compat.js"></script>
+<script>
+// Dán cấu hình Firebase Web App của bạn vào đây (Project settings > General > Your apps > SDK setup and configuration).
+// Các giá trị này không phải bí mật; bảo mật nằm ở firestore.rules.
+window.FIREBASE_CONFIG = {
+  apiKey: "AIzaSyAUdnZLdNh9rx2sBLA89e3M-MDtRjThyG8",
+  authDomain: "casioclicker.firebaseapp.com",
+  projectId: "casioclicker",
+  storageBucket: "casioclicker.firebasestorage.app",
+  messagingSenderId: "957149387894",
+  appId: "1:957149387894:web:db7805b97d8b70c170d357",
+};
+
+</script>
+<script>
+/* Firebase adapter for Casio Click.
+   Gives the game the same small API it uses on Claude Artifacts (window.claude.use('db' | 'user' | 'room')),
+   but backed by Firebase Auth + Cloud Firestore, and adds window.FB for sign-in / Google linking.
+   Accounts: anonymous Firebase user (guest, picks a player name). "Link Google" = linkWithPopup(Google).
+   Admin = a Google account whose verified email is hpmainho20@gmail.com; this is enforced in firestore.rules, not here. */
+(function(){
+  'use strict';
+  var KEY='cc-fbcfg';
+  var cfg=window.FIREBASE_CONFIG||{};
+  var okCfg=function(c){return !!(c&&c.apiKey&&c.projectId&&!/^YOUR_/.test(c.apiKey)&&!/^YOUR_/.test(c.projectId));};
+  if(!okCfg(cfg)){try{var sv=JSON.parse(localStorage.getItem(KEY)||'null');if(okCfg(sv))cfg=sv;}catch(e){}}   // config pasted in the setup box (this browser only)
+  var hasSdk=!!window.firebase;
+  var configured=hasSdk&&okCfg(cfg);
+  var FB=window.FB={configured:configured,sdk:hasSdk};
+  /* Accepts the snippet Firebase shows ("const firebaseConfig = { apiKey: ..., }") or JSON. Returns true when it looks complete. */
+  FB.saveConfig=function(txt){
+    var o={},re=/["']?(apiKey|authDomain|projectId|storageBucket|messagingSenderId|appId)["']?\s*:\s*["']([^"']+)["']/g,m;
+    while((m=re.exec(String(txt||''))))o[m[1]]=m[2];
+    if(!okCfg(o))return false;
+    try{localStorage.setItem(KEY,JSON.stringify(o));}catch(e){return false;}
+    return true;
+  };
+  if(!configured){window.claude={use:function(){return Promise.resolve(null);}};return;}
+
+  firebase.initializeApp(cfg);
+  var auth=firebase.auth(),fs=firebase.firestore();
+  try{fs.settings({ignoreUndefinedProperties:true});}catch(e){}
+  var G='google.com';
+
+  /* ---------- auth ---------- */
+  var readyP=new Promise(function(res){var off=auth.onAuthStateChanged(function(){off();res(auth.currentUser);});});
+  FB.ready=function(){return readyP;};
+  FB.user=function(){return auth.currentUser;};
+  FB.email=function(){
+    var u=auth.currentUser;if(!u)return null;
+    var p=(u.providerData||[]).filter(function(x){return x&&x.providerId===G;})[0];
+    return p&&p.email?String(p.email).toLowerCase():null;
+  };
+  function gp(){var p=new firebase.auth.GoogleAuthProvider();p.setCustomParameters({prompt:'select_account'});return p;}
+  FB.signInGuest=function(){return auth.signInAnonymously();};
+  FB.signInGoogle=function(){return auth.signInWithPopup(gp());};
+  FB.signOut=function(){return auth.signOut();};
+  FB.linkGoogle=function(){
+    var u=auth.currentUser;if(!u)return Promise.reject({code:'auth/no-user'});
+    if(FB.email())return Promise.resolve(FB.email());
+    return u.linkWithPopup(gp()).then(function(){
+      return auth.currentUser.getIdToken(true);          // refresh the token so Firestore rules see the new email claim
+    }).then(function(){return FB.email();});
+  };
+  FB.unlinkGoogle=function(){
+    var u=auth.currentUser;if(!u)return Promise.reject({code:'auth/no-user'});
+    return u.unlink(G).then(function(){return auth.currentUser.getIdToken(true);});
+  };
+
+  /* ---------- db ---------- */
+  function wrapQuery(q){
+    return {
+      limit:function(n){return wrapQuery(q.limit(n));},
+      get:function(){return q.get();},
+      onSnapshot:function(a,b){return q.onSnapshot(a,b||function(){});}
+    };
+  }
+  function lease(path){
+    return function(o){
+      o=o||{};var holder=String(o.holder||''),ttl=+o.ttlMs||4000;
+      var lr=fs.doc('leases/'+path.replace(/\//g,'__'));
+      return fs.runTransaction(function(tx){
+        return tx.get(lr).then(function(s){
+          var now=Date.now(),d=s.exists?s.data():null;
+          if(d&&d.exp>now&&d.holder!==holder)return {acquired:false};
+          tx.set(lr,{holder:holder,exp:now+ttl,uid:auth.currentUser.uid});
+          return {acquired:true};
+        });
+      });
+    };
+  }
+  var db={
+    doc:function(path){
+      var r=fs.doc(path);
+      return {get:function(){return r.get();},set:function(d){return r.set(d);},update:function(d){return r.update(d);},
+        delete:function(){return r.delete();},onSnapshot:function(a,b){return r.onSnapshot(a,b||function(){});},acquire:lease(path)};
+    },
+    collection:function(path){return wrapQuery(fs.collection(path));}
+  };
+
+  /* ---------- user ---------- */
+  var user={
+    id:function(){return readyP.then(function(){return auth.currentUser?auth.currentUser.uid:null;});},
+    can:function(){return Promise.resolve(true);},
+    isOwner:function(){return Promise.resolve(false);},
+    me:function(){return Promise.resolve({email:FB.email(),name:auth.currentUser&&auth.currentUser.displayName||''});}
+  };
+
+  /* ---------- room: presence on top of Firestore (one small doc per player per room, flushed every 400 ms) ---------- */
+  function makeRoom(name){
+    var uid=auth.currentUser.uid,ref=fs.doc('presence/'+name+'__'+uid);
+    var peers=[],merged={},timer=0,gone=false,dirty=false;
+    var unsub=fs.collection('presence').where('room','==',name).onSnapshot(function(s){
+      var now=Date.now();
+      peers=s.docs.map(function(d){return d.data();}).filter(function(x){return x&&now-(x.t||0)<20000;})
+        .map(function(x){return {isMe:x.uid===uid,by:x.uid,presence:x.p||{}};});
+    },function(){});
+    function flush(){timer=0;if(gone||!dirty)return;dirty=false;ref.set({room:name,uid:uid,t:Date.now(),p:merged}).catch(function(){});}
+    var rm={
+      presence:function(patch){
+        if(gone)return Promise.resolve();
+        for(var k in patch)merged[k]=patch[k];dirty=true;
+        if(!timer)timer=setTimeout(flush,400);
+        return Promise.resolve();
+      },
+      peers:function(){return peers;},
+      leave:function(){
+        if(gone)return Promise.resolve();
+        if(timer){clearTimeout(timer);flush();}
+        gone=true;try{unsub();}catch(e){}
+        setTimeout(function(){ref.delete().catch(function(){});},3000);   // linger so rivals can still read our final time
+        return Promise.resolve();
+      },
+      join:function(n){return Promise.resolve(makeRoom(n));}
+    };
+    return rm;
+  }
+  var base={join:function(n){return Promise.resolve(makeRoom(n));},presence:function(){return Promise.resolve();},peers:function(){return [];},leave:function(){return Promise.resolve();}};
+
+  window.claude={use:function(n){
+    return Promise.resolve(n==='db'?db:n==='user'?user:n==='room'?base:null);
+  }};
+})();
+
+</script>
 <script>
 (function(){
 'use strict';
@@ -1161,6 +1313,14 @@ const guard=(function(){
 // Admin is unlocked only after the player taps "Liên kết" and the platform reports this email for the signed-in account
 // (or the artifact owner links). Writing global events is additionally enforced by the db rules (Editor level), not by this check.
 const ADMIN_EMAIL='hpmainho20@gmail.com';
+function fbErr(e){const c=(e&&e.code)||'';
+  if(c==='auth/popup-closed-by-user'||c==='auth/cancelled-popup-request')return 'Bạn đã đóng cửa sổ đăng nhập Google.';
+  if(c==='auth/popup-blocked')return 'Trình duyệt đã chặn cửa sổ đăng nhập. Hãy cho phép popup rồi thử lại.';
+  if(c==='auth/credential-already-in-use'||c==='auth/email-already-in-use')return 'Tài khoản Google này đã gắn với một tài khoản game khác. Hãy đăng xuất rồi chọn "Đăng nhập bằng Google" để vào tài khoản đó.';
+  if(c==='auth/no-such-provider'||c==='auth/requires-recent-login')return 'Không hủy liên kết được lúc này. Hãy đăng nhập lại rồi thử.';
+  if(c==='auth/operation-not-allowed')return 'Firebase chưa bật phương thức đăng nhập này (Authentication > Sign-in method).';
+  if(c==='auth/unauthorized-domain')return 'Tên miền này chưa được thêm vào Authentication > Settings > Authorized domains.';
+  return 'Lỗi Firebase'+(c?' ('+c+')':'')+'.';}
 let LINK=null,isAdmin=false,RUSH=null,slotEvts=[],rushBusy=false,rushSeen='',evSeen='',rushTimer=0;
 const uniq=()=>Date.now().toString(36)+Math.random().toString(36).slice(2,6);
 const mask=e=>e?e.replace(/^(.).*(@.*)$/,'$1•••$2'):'';
@@ -1168,6 +1328,7 @@ const clock=ms=>{const s=Math.max(0,Math.ceil(ms/1000));return Math.floor(s/60)+
 const claimedCount=()=>RUSH?slotEvts.filter(x=>x===RUSH.id).length:0;
 
 async function verifyEmail(){
+  if(window.FB&&window.FB.configured)return FB.email();   // Firebase: only a Google provider linked through Firebase counts
   const u=await cap('user');if(!u)return null;
   try{const m=await u.me();return m&&m.email?String(m.email).toLowerCase():null;}catch(e){return null;}
 }
@@ -1183,12 +1344,14 @@ async function refreshAdmin(){
 }
 async function doLink(){
   if(offline){toast('Cần đăng nhập để liên kết tài khoản.');return;}
-  const em=await verifyEmail();
+  let em=null;
+  if(window.FB&&window.FB.configured){try{em=await FB.linkGoogle();}catch(e){toast(fbErr(e));return;}}else em=await verifyEmail();
   if(!em){toast('Không đọc được email của tài khoản. Hãy cho phép quyền email khi được hỏi rồi thử lại.');return;}
   S.lk=1;LINK=em;dirty=true;await refreshAdmin();
   toast('Đã liên kết '+mask(em)+(isAdmin?'. Đã mở bảng Admin.':'.'));openProfile();
 }
-function doUnlink(){
+async function doUnlink(){
+  if(window.FB&&window.FB.configured){try{await FB.unlinkGoogle();}catch(e){toast(fbErr(e));return;}}
   S.lk=0;LINK=null;dirty=true;isAdmin=false;$('#whoAdm').hidden=true;
   if(tab==='ad')tab='tm';renderTabs();renderPanel();toast('Đã hủy liên kết.');openProfile();
 }
@@ -1217,8 +1380,9 @@ function profHtml(p){
     +stat('Về nhất đua',p.rw||0)+stat('Kỷ lục đua',p.rb?p.rb.toFixed(2)+' m/s':'--')+'</div>';
   if(p.me){
     h+='<h3>Tài khoản</h3><ul class="list"><li class="row"><div class="grow"><b>Liên kết tài khoản Google</b><small>'
-      +(S.lk?(LINK?'Đã liên kết '+esc(mask(LINK)):'Đã liên kết, đang xác minh email'):'Dùng email của tài khoản bạn đang đăng nhập để liên kết.')+'</small></div>'
+      +(S.lk?(LINK?'Đã liên kết '+esc(mask(LINK)):'Đã liên kết, đang xác minh email'):'Cần đăng nhập Google qua Firebase để liên kết.')+'</small></div>'
       +(S.lk?'<button class="btn sm line" data-act="unlink">Hủy</button>':'<button class="btn sm" data-act="link">Liên kết</button>')+'</li>';
+    if(window.FB&&window.FB.configured)h+='<li class="row"><div class="grow"><b>Đăng xuất</b><small>Đăng nhập lại bằng Google để quay về tài khoản đã liên kết.</small></div><button class="btn sm line" data-act="logout">Đăng xuất</button></li>';
     if(isAdmin)h+='<li class="row"><div class="grow"><b>Quản trị viên</b><small>Bạn có quyền mở bảng Admin.</small></div><button class="btn sm gold" data-act="openadmin">Mở bảng Admin</button></li>';
     h+='</ul>';
   }
@@ -1230,6 +1394,7 @@ $('#modalBody').addEventListener('click',e=>{
   const b=e.target.closest('[data-act]');if(!b||!S)return;
   const a=b.dataset.act;
   if(a==='link')doLink();else if(a==='unlink')doUnlink();
+  else if(a==='logout'){if(!FB.email()){toast('Hãy liên kết Google trước khi đăng xuất, nếu không bạn sẽ mất tài khoản khách này.');return;}FB.signOut().then(()=>location.reload());}
   else if(a==='openadmin'){closeModal();tab='ad';renderTabs();renderPanel();}
 });
 
@@ -1654,7 +1819,7 @@ $('#modalBody').addEventListener('click',e=>{
 /* ---------- Account gate (register / log in) ---------- */
 const gate=h=>{$('#gateCard').innerHTML='<div class="lcd"><small>CASIO CLICK</small><b>Ans+1<span class="cursor">_</span></b></div>'+h;$('#gate').hidden=false;$('#gateCard').insertAdjacentHTML('beforeend','<p class="sub" style="margin:0;font-size:12px">Dev game: <b>deltahackios2026</b> · Admin: <b>Aloereid3</b></p>');};
 function gateRegister(){
-  gate('<h2>Tạo tài khoản</h2><p class="sub">Chọn tên người chơi. Tên này hiện trên bảng xếp hạng. Tài khoản gắn với phiên đăng nhập Claude của bạn.</p>'
+  gate('<h2>Tạo tài khoản</h2><p class="sub">Chọn tên người chơi. Tên này hiện trên bảng xếp hạng. Tài khoản này là tài khoản Firebase; hãy liên kết Google trong Hồ sơ để giữ tài khoản và chơi trên máy khác.</p>'
     +'<form id="regForm"><label for="regName">Tên người chơi</label><input id="regName" maxlength="16" autocomplete="off" placeholder="Ví dụ: Casio_Hero"><p class="err" id="regErr"></p><button class="btn big" id="regBtn" type="submit">Đăng ký và chơi</button></form>');
   $('#regForm').addEventListener('submit',registerSubmit);
 }
@@ -1680,7 +1845,8 @@ function gateLogin(d){
   $('#gateCard').querySelector('[data-g="login"]').addEventListener('click',()=>{S=s;startGame();});
 }
 function gateOffline(msg){
-  gate('<h2>Chưa đăng nhập được</h2><p class="sub">'+esc(msg)+'</p><button class="btn big" data-g="offline">Chơi thử offline</button><p class="sub">Chế độ offline chỉ lưu trong trình duyệt này và không lên bảng xếp hạng.</p>');
+  const outside=!window.claude;   // opened on a normal website: this is the Claude Artifact build, which has no Google/Firebase sign-in
+  gate('<h2>Chưa đăng nhập được</h2><p class="sub">'+esc(msg)+'</p>'+(outside?'<p class="sub" style="color:#ffd36b;font-weight:800">Bạn đang mở bản Artifact (chỉ chạy trong Claude). Muốn có Đăng nhập bằng Google, hãy tải lên web file <b>index.html</b> của gói Firebase, không phải casio-click.html.</p>':'')+'<button class="btn big" data-g="offline">Chơi thử offline</button><p class="sub">Chế độ offline chỉ lưu trong trình duyệt này và không lên bảng xếp hạng.</p>');
   $('#gateCard').querySelector('[data-g="offline"]').addEventListener('click',()=>{
     offline=true;let d={};try{d=JSON.parse(localStorage.getItem('cc-offline')||'{}')||{};}catch(e){}
     S=sane(d,'Khách');startGame();});
@@ -1697,13 +1863,34 @@ function startGame(){
   if(GL)GL.setPets(S.eq);else $('#btnPress').hidden=false;
   renderTabs();renderPanel();refreshHud();
   if(GL)GL.relayout();
+  if(window.FB&&window.FB.configured&&!offline)S.lk=FB.email()?1:0;   // the truth is Firebase's provider list
   initEvents();initInbox();initRace();if(S.lk)refreshAdmin();
   if(!offline)subscribeBoard();
   dirty=true;
 }
 async function cap(n){try{return window.claude&&window.claude.use?await window.claude.use(n):null;}catch(e){return null;}}
+function fbGate(msg){
+  // The Google button is ALWAYS shown. If Firebase is not configured yet, it explains what is missing instead of hiding the sign-in.
+  const cfgOk=FB.configured;
+  const why=!FB.sdk?'Không tải được thư viện Firebase (gstatic.com). Hãy kiểm tra mạng, hoặc trang đang bị chặn tải script ngoài.':'Chưa dán cấu hình Firebase nên chưa đăng nhập được. Chủ web: mở index.html, điền khối FIREBASE_CONFIG (xem README), hoặc dán tạm cấu hình vào ô bên dưới để thử trên trình duyệt này.';
+  gate('<h2>Đăng nhập</h2><p class="sub">Đăng nhập bằng Google để giữ tài khoản ở mọi thiết bị, hoặc chơi nhanh bằng tài khoản khách rồi liên kết Google sau.</p><p class="err" id="fbErr">'+esc(msg||(cfgOk?'':why))+'</p>'
+    +'<button class="btn big" data-g="google">Đăng nhập bằng Google</button><button class="btn big line" data-g="guest">Chơi bằng tên (khách)</button>'
+    +(cfgOk||!FB.sdk?'':'<details open style="margin-top:10px"><summary style="cursor:pointer;font-weight:800">Dán cấu hình Firebase (thử nhanh)</summary><textarea id="fbCfg" rows="6" style="width:100%;margin-top:6px;font:12px/1.3 monospace;border:3px solid var(--navy);border-radius:10px;padding:6px" placeholder="Dán đoạn firebaseConfig (apiKey, authDomain, projectId, appId...)"></textarea><button class="btn sm" data-g="savecfg" style="margin-top:6px">Lưu và tải lại</button></details>'));
+  const c=$('#gateCard'),err=$('#fbErr');
+  const need=()=>{if(FB.configured)return false;err.textContent=why;return true;};
+  c.querySelector('[data-g="google"]').addEventListener('click',async()=>{if(need())return;try{await FB.signInGoogle();boot();}catch(e){err.textContent=fbErr(e);}});
+  c.querySelector('[data-g="guest"]').addEventListener('click',async()=>{if(need())return;try{await FB.signInGuest();boot();}catch(e){err.textContent=fbErr(e);}});
+  const sv=c.querySelector('[data-g="savecfg"]');
+  if(sv)sv.addEventListener('click',()=>{if(FB.saveConfig($('#fbCfg').value))location.reload();else err.textContent='Cấu hình chưa đủ: cần apiKey, projectId (và authDomain, appId).';});
+}
 async function boot(){
   renderTabs();
+  if(window.FB){
+    if(!FB.configured){fbGate();return;}
+    gate('<h2>Đang kết nối</h2><p class="sub">Đang kiểm tra tài khoản Firebase.</p>');
+    await Promise.race([FB.ready(),new Promise(r=>setTimeout(r,10000))]);
+    if(!FB.user()){fbGate();return;}
+  }
   gate('<h2>Đang kết nối</h2><p class="sub">Đang kiểm tra tài khoản của bạn.</p>');
   let done=false;
   const timer=setTimeout(()=>{if(!done){done=true;gateOffline('Chưa kết nối được máy chủ lưu dữ liệu sau 10 giây.');}},10000);
@@ -1713,7 +1900,7 @@ async function boot(){
   if(u){try{id=await u.id();}catch(e){}try{cw=await u.can('data.write');}catch(e){}}
   if(done)return;
   const stop=()=>{clearTimeout(timer);done=true;};
-  if(!d||!id){stop();gateOffline('Bạn cần đăng nhập Claude để dùng tài khoản và bảng xếp hạng.');return;}
+  if(!d||!id){stop();gateOffline('Bạn cần đăng nhập để dùng tài khoản và bảng xếp hạng.');return;}
   if(cw===false){stop();gateOffline('Quyền hiện tại chỉ cho xem, chưa thể lưu dữ liệu. Chủ trang cần cấp quyền Contributor.');return;}
   DB=d;UID=id;
   try{
@@ -1726,4 +1913,5 @@ boot();
 })();
 </script>
 
-</body></html>
+</body>
+</html>
